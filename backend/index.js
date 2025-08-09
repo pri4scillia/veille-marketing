@@ -8,8 +8,23 @@ const path = require('path');
 const crypto = require('crypto');
 
 const app = express();
-app.use(cors());            // autorise le front en dev
-app.use(express.json());    // JSON body parser
+
+// CORS (option : fixer une origine en PROD via FRONTEND_ORIGIN)
+app.use(cors({
+  origin: process.env.FRONTEND_ORIGIN || true,
+}));
+
+app.use(express.json()); // JSON body parser
+
+// ---- Logs des requêtes (pratique en déploiement) ----------------------------
+app.use((req, _res, next) => {
+  const t = new Date().toISOString();
+  console.log(`[${t}] ${req.method} ${req.url}`);
+  if (req.body && Object.keys(req.body).length) {
+    console.log('Body:', req.body);
+  }
+  next();
+});
 
 // ---- Fichier des favoris ----------------------------------------------------
 const favoritesFile = path.join(__dirname, 'favorites.json');
@@ -35,8 +50,7 @@ async function writeFavorites(favs) {
 const normalizeUrl = (rawUrl) => {
   try {
     const u = new URL(rawUrl.trim());
-    u.hash = ''; // retire le fragment
-    // retire les paramètres UTM
+    u.hash = '';
     [...u.searchParams.keys()].forEach(k => {
       if (k.toLowerCase().startsWith('utm_')) u.searchParams.delete(k);
     });
@@ -58,38 +72,42 @@ app.get('/api/hello', (_req, res) => {
   res.json({ message: 'Hello world' });
 });
 
-// Actus Reddit (tu pourras agréger d’autres sources plus tard)
-app.get('/api/news', async (_req, res) => {
+// Actus Reddit
+app.get('/api/news', async (_req, res, next) => {
   try {
-    const response = await fetch('https://www.reddit.com/r/marketing/new.json');
+    const response = await fetch('https://www.reddit.com/r/marketing/new.json', {
+      headers: { 'User-Agent': 'veille-marketing/1.0' },
+    });
     const data = await response.json();
 
-    const articles = (data?.data?.children || []).map(post => ({
-      title: post?.data?.title ?? 'Untitled',
-      source: 'Reddit',
-      url: `https://www.reddit.com${post?.data?.permalink ?? ''}`
-    })).filter(a => a.url.startsWith('https://www.reddit.com/'));
+    const articles = (data?.data?.children || [])
+      .map(post => ({
+        title: post?.data?.title ?? 'Untitled',
+        source: 'Reddit',
+        url: `https://www.reddit.com${post?.data?.permalink ?? ''}`,
+      }))
+      .filter(a => a.url.startsWith('https://www.reddit.com/'));
 
     res.json(articles);
   } catch (error) {
     console.error('Erreur /api/news :', error);
-    res.status(500).json({ error: 'Erreur lors de la récupération des actualités.' });
+    next(error);
   }
 });
 
 // Favoris - liste
-app.get('/api/favorites', async (_req, res) => {
+app.get('/api/favorites', async (_req, res, next) => {
   try {
     const favorites = await readFavorites();
     res.json(favorites);
   } catch (err) {
     console.error('Erreur GET /api/favorites :', err);
-    res.status(500).json({ error: 'Impossible de lire les favoris' });
+    next(err);
   }
 });
 
-// Favoris - ajout (anti-doublon par URL normalisée -> id)
-app.post('/api/favorites', async (req, res) => {
+// Favoris - ajout
+app.post('/api/favorites', async (req, res, next) => {
   try {
     const body = req.body || {};
     if (!body.url || !body.title) {
@@ -109,7 +127,7 @@ app.post('/api/favorites', async (req, res) => {
       title: body.title,
       source: body.source || 'Unknown',
       url,
-      savedAt: new Date().toISOString()
+      savedAt: new Date().toISOString(),
     };
 
     favorites.push(newFavorite);
@@ -118,12 +136,12 @@ app.post('/api/favorites', async (req, res) => {
     res.status(201).json(newFavorite);
   } catch (err) {
     console.error('Erreur POST /api/favorites :', err);
-    res.status(500).json({ error: 'Erreur écriture favoris' });
+    next(err);
   }
 });
 
-// Favoris - suppression par id
-app.delete('/api/favorites/:id', async (req, res) => {
+// Favoris - suppression
+app.delete('/api/favorites/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const favorites = await readFavorites();
@@ -137,12 +155,18 @@ app.delete('/api/favorites/:id', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Erreur DELETE /api/favorites/:id :', err);
-    res.status(500).json({ error: 'Erreur écriture favoris' });
+    next(err);
   }
 });
 
+// ---- Middleware global d’erreur ---------------------------------------------
+app.use((err, _req, res, _next) => {
+  console.error('Erreur non gérée :', err.stack || err);
+  res.status(500).json({ error: 'Une erreur interne est survenue' });
+});
+
 // ---- Démarrage serveur ------------------------------------------------------
-const PORT = process.env.PORT || 4000; 
+const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(` Backend up on http://localhost:${PORT}`);
 });
