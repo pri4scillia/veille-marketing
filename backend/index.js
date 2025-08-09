@@ -142,7 +142,7 @@ app.delete('/api/favorites/:id', async (req, res) => {
 });
 
 // ---- Démarrage serveur ------------------------------------------------------
-const PORT = 4000; // fixe pour éviter les conflits
+const PORT = process.env.PORT || 4000; 
 app.listen(PORT, () => {
   console.log(` Backend up on http://localhost:${PORT}`);
 });

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: veille-marketing-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: PORT
+        value: 4000
