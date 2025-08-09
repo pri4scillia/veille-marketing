@@ -1,0 +1,12 @@
+### POST un favori
+POST http://localhost:4000/api/favorites
+Content-Type: application/json
+
+{
+  "title": "Article de test",
+  "source": "Reddit",
+  "url": "https://www.reddit.com/r/marketing/comments/abc123"
+}
+
+### GET les favoris
+GET http://localhost:4000/api/favorites
