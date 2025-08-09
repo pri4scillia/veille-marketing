@@ -9,14 +9,27 @@ const crypto = require('crypto');
 
 const app = express();
 
-// CORS (option : fixer une origine en PROD via FRONTEND_ORIGIN)
+// ---- CORS -------------------------------------------------
+const allowedOrigins = [
+  'http://localhost:5173',              // Dev local
+  'https://veille-marketing.vercel.app' // Prod Vercel
+];
+
 app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN || true,
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'DELETE'],
+  allowedHeaders: ['Content-Type']
 }));
 
 app.use(express.json()); // JSON body parser
 
-// ---- Logs des requêtes (pratique en déploiement) ----------------------------
+// ---- Logs des requêtes ------------------------------------------------------
 app.use((req, _res, next) => {
   const t = new Date().toISOString();
   console.log(`[${t}] ${req.method} ${req.url}`);
@@ -29,7 +42,6 @@ app.use((req, _res, next) => {
 // ---- Fichier des favoris ----------------------------------------------------
 const favoritesFile = path.join(__dirname, 'favorites.json');
 
-// Helpers I/O JSON avec auto-création
 async function readFavorites() {
   try {
     const data = await fsp.readFile(favoritesFile, 'utf-8');
@@ -42,6 +54,7 @@ async function readFavorites() {
     throw err;
   }
 }
+
 async function writeFavorites(favs) {
   await fsp.writeFile(favoritesFile, JSON.stringify(favs, null, 2), 'utf-8');
 }
@@ -61,6 +74,7 @@ const normalizeUrl = (rawUrl) => {
     return rawUrl.trim();
   }
 };
+
 const idFromUrl = (url) => crypto.createHash('sha1').update(url).digest('hex');
 
 // ---- Routes -----------------------------------------------------------------
