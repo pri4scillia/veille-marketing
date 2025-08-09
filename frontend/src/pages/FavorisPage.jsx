@@ -1,3 +1,4 @@
+// frontend/src/pages/FavorisPage.jsx
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { API_URL } from '../config';
@@ -30,7 +31,10 @@ export default function FavorisPage() {
         if (!r.ok) throw new Error('Suppression impossible');
         setFavoris(prev => prev.filter(f => f.id !== id));
       })
-      .catch(err => console.error('Erreur suppression favori :', err));
+      .catch(err => {
+        console.error('Erreur suppression favori :', err);
+        setErrMsg("Erreur lors de la suppression");
+      });
   };
 
   return (

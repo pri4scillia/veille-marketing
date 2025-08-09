@@ -26,7 +26,7 @@ export default function NewsList() {
       const urls = new Set((data || []).map(f => f.url));
       setFavUrls(urls);
     } catch (e) {
-      console.error(e);
+      console.error('Erreur GET favoris :', e);
     }
   }, []);
 
@@ -49,7 +49,7 @@ export default function NewsList() {
     })();
   }, [loadFavorites]);
 
-  // Ajoute si pas déjà favori; sinon ne fait rien. (Toggle possible si tu veux, mais ici on ne supprime pas depuis cette page)
+  // Ajoute si pas déjà favori
   const ajouterAuxFavoris = async (article) => {
     if (favUrls.has(article.url)) return; // déjà ajouté
 
@@ -67,7 +67,6 @@ export default function NewsList() {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || "Erreur lors de l'ajout aux favoris");
       }
-      // met à jour l'état local: le bouton passe à "Ajouté ✓"
       setFavUrls(prev => new Set(prev).add(article.url));
       console.log(` Ajouté aux favoris : ${article.title}`);
     } catch (err) {
