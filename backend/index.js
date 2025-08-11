@@ -12,35 +12,61 @@ app.use(cors({
 }));
 app.use(express.json());
 
+// Ping racine
 app.get('/', (_req, res) => {
   res.send('Bienvenue sur le backend !');
 });
 
-// Route /api/news avec fetch natif
-app.get('/api/news', async (_req, res) => {
-  try {
-    const response = await fetch('https://www.reddit.com/r/marketing/new.json', {
-      headers: {
-        'User-Agent': 'veille-marketing/1.0 (+https://example.com)'
-      },
-    });
+/**
+ * /api/news
+ * 1) Tente Reddit direct
+ * 2) Si 403/blocked, fallback via proxy public r.jina.ai
+ */
+app.get('/api/news', async (_req, res, next) => {
+  const REDDIT_JSON = 'https://www.reddit.com/r/marketing/new.json?raw_json=1';
+  const PROXY_JSON  = 'https://r.jina.ai/http://www.reddit.com/r/marketing/new.json?raw_json=1';
 
-    if (!response.ok) {
-      const txt = await response.text().catch(() => '');
-      throw new Error(`Reddit HTTP ${response.status} ${response.statusText} — ${txt.slice(0,200)}`);
+  async function fetchJson(url) {
+    const r = await fetch(url, {
+      headers: {
+        
+        'User-Agent': 'veille-marketing/1.0 (+https://example.com)'
+      }
+    });
+    const text = await r.text(); 
+    if (!r.ok) {
+      throw new Error(`HTTP ${r.status} ${r.statusText} — ${text.slice(0, 200)}`);
+    }
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error(`JSON parse error: ${e.message} — ${text.slice(0, 200)}`);
+    }
+  }
+
+  try {
+    let data;
+    try {
+      // 1) essai direct
+      data = await fetchJson(REDDIT_JSON);
+    } catch (e) {
+      console.warn('Reddit direct bloqué, fallback proxy:', e.message);
+      // 2) fallback proxy
+      data = await fetchJson(PROXY_JSON);
     }
 
-    const data = await response.json();
-    const articles = (data?.data?.children || []).map(post => ({
-      title: post?.data?.title ?? 'Untitled',
-      source: 'Reddit',
-      url: `https://www.reddit.com${post?.data?.permalink ?? ''}`,
-    }));
+    const articles = (data?.data?.children || [])
+      .map(post => ({
+        title:  post?.data?.title ?? 'Untitled',
+        source: 'Reddit',
+        url:    `https://www.reddit.com${post?.data?.permalink ?? ''}`,
+      }))
+      .filter(a => a.url.startsWith('https://www.reddit.com/'));
 
     res.json(articles);
   } catch (error) {
     console.error('Erreur /api/news :', error);
-    res.status(500).json({ error: error.message }); // 🔹 affiche le vrai message
+    next(error); 
   }
 });
 
