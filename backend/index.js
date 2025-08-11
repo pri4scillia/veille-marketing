@@ -72,8 +72,8 @@ app.get('/api/news', async (_req, res, next) => {
 
 // Middleware global d’erreur
 app.use((err, _req, res, _next) => {
-  console.error('Erreur non gérée :', err);
-  res.status(500).json({ error: 'Une erreur interne est survenue' });
+  console.error('Erreur non gérée :', err); // log complet sur Render
+  res.status(500).json({ error: err.message || 'Une erreur interne est survenue' });
 });
 
 const PORT = process.env.PORT || 4000;
