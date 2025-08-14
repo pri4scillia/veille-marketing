@@ -5,23 +5,45 @@ const fs = require('fs');
 const fsp = fs.promises;
 const path = require('path');
 const crypto = require('crypto');
+const RSSParser = require('rss-parser');
 
 const app = express();
+const parser = new RSSParser({
+  headers: {
+    
+    'User-Agent': process.env.REDDIT_USER_AGENT || 'veille-marketing/1.0 by u/TON_PSEUDO_REDDIT'
+  },
+});
 
-// ---- CORS -------------------------------------------------------------------
 app.use(cors({
-  origin: process.env.FRONTEND_ORIGIN || true, // en prod, mets ton domaine Vercel
+  origin: process.env.FRONTEND_ORIGIN || true, // autorise Vercel (ou tout) en dev
 }));
 app.use(express.json());
 
-// ---- Logs simples -----------------------------------------------------------
-app.use((req, _res, next) => {
-  const t = new Date().toISOString();
-  console.log(`[${t}] ${req.method} ${req.url}`);
-  next();
+
+app.get('/', (_req, res) => res.send('Bienvenue sur le backend !'));
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+
+
+app.get('/api/news', async (_req, res, next) => {
+  try {
+    
+    const feed = await parser.parseURL('https://www.reddit.com/r/marketing/.rss');
+
+    const articles = (feed.items || []).slice(0, 30).map(item => ({
+      title: item.title || 'Untitled',
+      source: 'Reddit',
+      url: (item.link || '').replace(/\/$/, ''), // nettoie la fin
+    })).filter(a => a.url.startsWith('https://www.reddit.com/'));
+
+    res.json(articles);
+  } catch (err) {
+    console.error('Erreur /api/news (RSS) :', err);
+    next(err);
+  }
 });
 
-// ---- Fichier des favoris ----------------------------------------------------
+// ---- Favoris: stockage fichier JSON ----------------------------------------
 const favoritesFile = path.join(__dirname, 'favorites.json');
 
 async function readFavorites() {
@@ -39,8 +61,6 @@ async function readFavorites() {
 async function writeFavorites(favs) {
   await fsp.writeFile(favoritesFile, JSON.stringify(favs, null, 2), 'utf-8');
 }
-
-// ---- Utilitaires URL/ID -----------------------------------------------------
 const normalizeUrl = (rawUrl) => {
   try {
     const u = new URL(rawUrl.trim());
@@ -57,100 +77,7 @@ const normalizeUrl = (rawUrl) => {
 };
 const idFromUrl = (url) => crypto.createHash('sha1').update(url).digest('hex');
 
-// ---- Page d’accueil ---------------------------------------------------------
-app.get('/', (_req, res) => {
-  res.send('Bienvenue sur le backend !');
-});
-
-
-let redditToken = null;      // { access_token, expires_at }
-const REDDIT_OAUTH_URL = 'https://www.reddit.com/api/v1/access_token';
-const USER_AGENT = 'veille-marketing/1.0 (+https://veille-marketing.vercel.app)';
-
-async function getRedditToken() {
-  const now = Date.now();
-  if (redditToken && redditToken.expires_at > now + 5000) {
-    return redditToken.access_token;
-  }
-
-  const clientId = process.env.REDDIT_CLIENT_ID;
-  const clientSecret = process.env.REDDIT_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    throw new Error('REDDIT_CLIENT_ID/REDDIT_CLIENT_SECRET manquants');
-  }
-
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-
-  const resp = await fetch(REDDIT_OAUTH_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${basic}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': USER_AGENT,
-    },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-    })
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => '');
-    throw new Error(`OAuth Reddit échoué: ${resp.status} ${resp.statusText} — ${txt.slice(0,200)}`);
-  }
-
-  const data = await resp.json();
-  redditToken = {
-    access_token: data.access_token,
-    expires_at: Date.now() + (data.expires_in * 1000) // ~1h
-  };
-  return redditToken.access_token;
-}
-
-// ---- /api/news --------------------------------------------------------------
-app.get('/api/news', async (_req, res, next) => {
-  try {
-    const token = await getRedditToken();
-
-    const url = 'https://oauth.reddit.com/r/marketing/new.json?limit=30';
-    let r = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'User-Agent': USER_AGENT,
-      }
-    });
-
-    // Si le token a expiré ou 401 → on retente 1 fois avec un nouveau token
-    if (r.status === 401) {
-      redditToken = null;
-      const token2 = await getRedditToken();
-      r = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token2}`,
-          'User-Agent': USER_AGENT,
-        }
-      });
-    }
-
-    if (!r.ok) {
-      const txt = await r.text().catch(() => '');
-      throw new Error(`Reddit ${r.status} ${r.statusText} — ${txt.slice(0,200)}`);
-    }
-
-    const data = await r.json();
-    const articles = (data?.data?.children || []).map(post => ({
-      title: post?.data?.title ?? 'Untitled',
-      source: 'Reddit',
-      url: `https://www.reddit.com${post?.data?.permalink ?? ''}`,
-    }));
-
-    res.json(articles);
-  } catch (err) {
-    console.error('Erreur /api/news :', err);
-    next(err);
-  }
-});
-
-// ---- Favoris : liste --------------------------------------------------------
+// Liste
 app.get('/api/favorites', async (_req, res, next) => {
   try {
     const favorites = await readFavorites();
@@ -161,7 +88,7 @@ app.get('/api/favorites', async (_req, res, next) => {
   }
 });
 
-// ---- Favoris : ajout --------------------------------------------------------
+// Ajout
 app.post('/api/favorites', async (req, res, next) => {
   try {
     const body = req.body || {};
@@ -182,12 +109,11 @@ app.post('/api/favorites', async (req, res, next) => {
       title: body.title,
       source: body.source || 'Unknown',
       url,
-      savedAt: new Date().toISOString(),
+      savedAt: new Date().toISOString()
     };
 
     favorites.push(newFavorite);
     await writeFavorites(favorites);
-
     res.status(201).json(newFavorite);
   } catch (err) {
     console.error('Erreur POST /api/favorites :', err);
@@ -195,7 +121,7 @@ app.post('/api/favorites', async (req, res, next) => {
   }
 });
 
-// ---- Favoris : suppression --------------------------------------------------
+// Suppression
 app.delete('/api/favorites/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
